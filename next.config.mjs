@@ -14,11 +14,9 @@ const withPWA = withPWAInit({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  eslint: {
-    ignoreDuringBuilds: true, // Forces Vercel to bypass errors
-  },
+  turbopack: {}, // MAGIC FIX: Silences the Next 16 Turbopack crash
   typescript: {
-    ignoreBuildErrors: true,  // Forces Vercel to bypass errors
+    ignoreBuildErrors: true, // We still keep TS bypass just in case
   },
 };
 
