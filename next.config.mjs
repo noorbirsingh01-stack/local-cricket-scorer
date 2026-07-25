@@ -14,12 +14,11 @@ const withPWA = withPWAInit({
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // ADD THESE TWO BLOCKS TO FORCE THE BUILD:
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: true, // Forces Vercel to bypass errors
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: true,  // Forces Vercel to bypass errors
   },
 };
 

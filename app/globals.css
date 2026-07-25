@@ -92,7 +92,7 @@ body {
   font-size: 1rem; 
   transition: border-color 0.2s; 
   width: 100%; 
-  min-width: 0; /* Ensures the input itself shrinks to fit the mobile screen */
+  min-width: 0; /* Ensures the input shrinks to fit the mobile screen */
 }
 .formal-input:focus { outline: none; border-color: #3B82F6; background: rgba(15, 23, 42, 1); }
 
