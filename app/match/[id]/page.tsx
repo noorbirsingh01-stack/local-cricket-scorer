@@ -1,519 +1,398 @@
-"use client";
-import { useParams, useRouter } from 'next/navigation';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useState, useEffect, useRef } from 'react';
-import html2canvas from 'html2canvas';
+'use client';
+
+import React, { useState, useEffect, use } from 'react';
+import { db, Match, BallEvent } from '@/lib/db';
+import { useRouter } from 'next/navigation';
+import WormChart from '@/components/WormChart';
+import LiveCommentary from '@/components/LiveCommentary';
+import { ArrowLeft, RotateCcw, Shield, Activity, BarChart2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { db, BallEvent } from '../../../lib/db';
-import WormChart from '../../../components/WormChart';
-import LiveCommentary from '../../../components/LiveCommentary';
-import { Activity, LayoutList, MessageSquare, Download, ChevronLeft, UserCircle, Target, Undo2 } from 'lucide-react';
 
-export default function PremiumProScorer() {
-  const params = useParams();
+interface PageProps {
+  params: Promise<{ id: string }>;
+}
+
+export default function MatchCommandCenter({ params }: PageProps) {
+  const { id } = use(params);
   const router = useRouter();
-  const matchId = Number(params.id);
-  const summaryCardRef = useRef<HTMLDivElement>(null);
-  
-  const [activeTab, setActiveTab] = useState<'scorer' | 'scorecard' | 'commentary' | 'summary'>('scorer');
-  const [newBatsmanName, setNewBatsmanName] = useState('');
-  const [newBowlerName, setNewBowlerName] = useState('');
-  const [innings1Striker, setInnings1Striker] = useState('');
-  const [innings1NonStriker, setInnings1NonStriker] = useState('');
-  const [innings1Bowler, setInnings1Bowler] = useState('');
-  const [pendingWicketBall, setPendingWicketBall] = useState<any>(null);
-  const [commentaryFeed, setCommentaryFeed] = useState<any[]>([]);
 
-  const match = useLiveQuery(() => db.matches.get(matchId), [matchId]);
-  const balls = useLiveQuery(() => db.balls.where('matchId').equals(matchId).toArray(), [matchId]);
+  const [match, setMatch] = useState<Match | null>(null);
+  const [balls, setBalls] = useState<BallEvent[]>([]);
+  const [activeTab, setActiveTab] = useState<'scorer' | 'scorecard' | 'feed'>('scorer');
+  const [commentaries, setCommentaries] = useState<Array<{ id: string; text: string; timestamp: string }>>([]);
+
+  const [newBatterName, setNewBatterName] = useState('');
+  const [newBowlerName, setNewBowlerName] = useState('');
+
+  const loadMatchData = async () => {
+    const m = await db.matches.get(id);
+    if (m) {
+      setMatch(m);
+      const b = await db.balls.where('matchId').equals(id).toArray();
+      setBalls(b);
+    }
+  };
 
   useEffect(() => {
-    if (match?.status === 'completed') {
-      confetti({
-        particleCount: 150,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ['#3B82F6', '#F8FAFC']
-      });
-    }
-  }, [match?.status]);
+    loadMatchData();
+  }, [id]);
 
-  if (!match || !balls) return <div className="loading-screen">Loading Match Details...</div>;
-
-  const currentInningsBalls = balls.filter(b => b.innings === match.innings);
-  const totalRuns = currentInningsBalls.reduce((sum, b) => sum + b.batsmanRuns + b.extrasRuns, 0);
-  const totalWickets = currentInningsBalls.filter(b => b.isWicket).length;
-  const legalBalls = currentInningsBalls.filter(b => b.isLegalDelivery);
-  const completedOvers = Math.floor(legalBalls.length / 6);
-  const currentBallsInOver = legalBalls.length % 6;
-
-  const isAllOut = totalWickets >= match.wicketsLimit;
-  const isOversFinished = completedOvers >= match.totalOvers;
-  const isInnFinished = isOversFinished || isAllOut;
-  const target = match.target;
-  const isTargetChased = target !== null && totalRuns >= target;
-
-  let matchResultText = "";
-  let inn1ScoreStr = "";
-  let inn2ScoreStr = "";
-
-  const inn1Balls = balls.filter(b => b.innings === 1);
-  const inn2Balls = balls.filter(b => b.innings === 2);
-  const inn1Runs = inn1Balls.reduce((sum, b) => sum + b.batsmanRuns + b.extrasRuns, 0);
-  const inn1Wickets = inn1Balls.filter(b => b.isWicket).length;
-  const inn1LegalBalls = inn1Balls.filter(b => b.isLegalDelivery).length;
-  const inn1Overs = `${Math.floor(inn1LegalBalls / 6)}.${inn1LegalBalls % 6}`;
-  inn1ScoreStr = `${inn1Runs}/${inn1Wickets} (${inn1Overs})`;
-
-  const inn2Runs = inn2Balls.reduce((sum, b) => sum + b.batsmanRuns + b.extrasRuns, 0);
-  const inn2Wickets = inn2Balls.filter(b => b.isWicket).length;
-  const inn2LegalBalls = inn2Balls.filter(b => b.isLegalDelivery).length;
-  const inn2Overs = `${Math.floor(inn2LegalBalls / 6)}.${inn2LegalBalls % 6}`;
-  if (match.status === 'completed' || match.innings === 2) {
-      inn2ScoreStr = `${inn2Runs}/${inn2Wickets} (${inn2Overs})`;
+  if (!match) {
+    return <div className="loading-screen">Loading Match Command Center...</div>;
   }
 
-  if (match.status === 'completed') {
-    if (inn2Runs >= inn1Runs && inn1Runs > 0) { 
-      const wicketsLeft = match.wicketsLimit - inn2Wickets;
-      matchResultText = `${match.teamB} won by ${wicketsLeft} wicket${wicketsLeft !== 1 ? 's' : ''}`;
-    } else if (inn1Runs > inn2Runs) { 
-      const runsDiff = inn1Runs - inn2Runs;
-      matchResultText = `${match.teamA} won by ${runsDiff} run${runsDiff !== 1 ? 's' : ''}`;
-    } else {
-      matchResultText = "Match Tied";
+  const isInn1 = match.currentInning === 1;
+  const currentScore = isInn1 ? match.inning1Score : match.inning2Score;
+  const currentWickets = isInn1 ? match.inning1Wickets : match.inning2Wickets;
+  const currentOvers = isInn1 ? match.inning1Overs : match.inning2Overs;
+  const currentBalls = isInn1 ? match.inning1Balls : match.inning2Balls;
+
+  const recordBall = async (batsmanRuns: number, extrasRuns: number, extraType: BallEvent['extraType'], isWicket: boolean) => {
+    if (match.isCompleted || match.isWaitingForNewBatter || match.isWaitingForNewBowler || match.isInningsBreak) return;
+
+    let legalBall = extraType !== 'wide' && extraType !== 'noball';
+    let nextBalls = currentBalls + (legalBall ? 1 : 0);
+    let nextOvers = currentOvers;
+    let overCompleted = false;
+
+    if (nextBalls >= 6) {
+      nextOvers += 1;
+      nextBalls = 0;
+      overCompleted = true;
     }
-  }
 
-  const batsmenStats: { [name: string]: { runs: number; balls: number; fours: number; sixes: number; dismissal: string } } = {};
-  const bowlerStats: { [name: string]: { legalBallsCount: number; runsConceded: number; wickets: number } } = {};
+    const totalBallRuns = batsmanRuns + extrasRuns;
+    const nextScore = currentScore + totalBallRuns;
+    const nextWickets = currentWickets + (isWicket ? 1 : 0);
 
-  [match.currentStriker, match.currentNonStriker].forEach(name => {
-    if (name) batsmenStats[name] = { runs: 0, balls: 0, fours: 0, sixes: 0, dismissal: 'not out' };
-  });
+    const inningsEnded = nextWickets >= match.totalWickets || nextOvers >= match.totalOvers;
 
-  currentInningsBalls.forEach(ball => {
-    if (ball.batterName) {
-      if (!batsmenStats[ball.batterName]) batsmenStats[ball.batterName] = { runs: 0, balls: 0, fours: 0, sixes: 0, dismissal: 'not out' };
-      if (ball.extraType !== 'wide') batsmenStats[ball.batterName].balls += 1;
-      batsmenStats[ball.batterName].runs += ball.batsmanRuns;
-      if (ball.batsmanRuns === 4) batsmenStats[ball.batterName].fours += 1;
-      if (ball.batsmanRuns === 6) batsmenStats[ball.batterName].sixes += 1;
-      if (ball.isWicket) batsmenStats[ball.batterName].dismissal = `b ${ball.bowlerName}`;
-    }
-    if (ball.bowlerName) {
-      if (!bowlerStats[ball.bowlerName]) bowlerStats[ball.bowlerName] = { legalBallsCount: 0, runsConceded: 0, wickets: 0 };
-      bowlerStats[ball.bowlerName].runsConceded += (ball.batsmanRuns + ball.extrasRuns);
-      if (ball.isLegalDelivery) bowlerStats[ball.bowlerName].legalBallsCount += 1;
-      if (ball.isWicket) bowlerStats[ball.bowlerName].wickets += 1;
-    }
-  });
-
-  const strikerStat = batsmenStats[match.currentStriker] || { runs: 0, balls: 0 };
-  const nonStrikerStat = batsmenStats[match.currentNonStriker] || { runs: 0, balls: 0 };
-  const bowlerStat = bowlerStats[match.currentBowler] || { legalBallsCount: 0, runsConceded: 0, wickets: 0 };
-  const bowlerOversFormatted = `${Math.floor(bowlerStat.legalBallsCount / 6)}.${bowlerStat.legalBallsCount % 6}`;
-
-  const undoLastBall = async () => {
-    if (match.status === 'completed' || match.status === 'innings_break') {
-      alert("Match phase has concluded. Cannot undo past this point.");
-      return;
-    }
-    if (currentInningsBalls.length === 0) return;
-
-    const lastBall = currentInningsBalls[currentInningsBalls.length - 1];
-    await db.balls.delete(lastBall.id!);
-    
-    await db.matches.update(matchId, {
-      currentStriker: lastBall.batterName,
-      currentBowler: lastBall.bowlerName,
-      isWaitingForNewBatter: false,
-      isWaitingForNewBowler: false
-    });
-    setPendingWicketBall(null);
-  };
-
-  const recordDelivery = async (batsmanRuns: number, extrasRuns: number, extraType: BallEvent['extraType'], isWicket: boolean) => {
-    if (isInnFinished || isTargetChased || match.status === 'completed') return;
-
-    if (isWicket) {
-      setPendingWicketBall({ batsmanRuns, extrasRuns, extraType, isWicket });
-      if (totalWickets + 1 >= match.wicketsLimit) {
-         await executeBallCommit(batsmanRuns, extrasRuns, extraType, true, match.currentStriker, true);
+    let matchWon = false;
+    let resultText = '';
+    if (!isInn1 && match.target && nextScore >= match.target) {
+      matchWon = true;
+      resultText = `${match.battingTeam} won by ${match.totalWickets - nextWickets} wickets`;
+    } else if (inningsEnded && isInn1) {
+      // Innings 1 Concluded
+    } else if (inningsEnded && !isInn1) {
+      if (nextScore > (match.target! - 1)) {
+        resultText = `${match.battingTeam} won by ${match.totalWickets - nextWickets} wickets`;
+      } else if (nextScore === match.target! - 1) {
+        resultText = `Match Tied!`;
       } else {
-         await db.matches.update(matchId, { isWaitingForNewBatter: true });
+        resultText = `${match.bowlingTeam} won by ${(match.target! - 1) - nextScore} runs`;
       }
-      return;
+      matchWon = true;
     }
-    await executeBallCommit(batsmanRuns, extrasRuns, extraType, false, match.currentStriker, false);
-  };
 
-  const executeBallCommit = async (batsmanRuns: number, extrasRuns: number, extraType: BallEvent['extraType'], isWicket: boolean, strikerToRecord: string, isForcedAllOut: boolean) => {
-    const isLegalDelivery = extraType !== 'wide' && extraType !== 'noball';
+    let nextStriker = match.striker;
+    let nextNonStriker = match.nonStriker;
+    if (batsmanRuns % 2 !== 0) {
+      const temp = nextStriker;
+      nextStriker = nextNonStriker;
+      nextNonStriker = temp;
+    }
+
+    if (overCompleted && !matchWon && !inningsEnded) {
+      const temp = nextStriker;
+      nextStriker = nextNonStriker;
+      nextNonStriker = temp;
+    }
 
     const newBall: BallEvent = {
-      matchId,
-      innings: match.innings,
-      overNumber: completedOvers,
-      ballNumber: currentBallsInOver + 1,
+      matchId: id,
+      inning: match.currentInning,
+      ballNumber: nextBalls === 0 ? 6 : nextBalls,
+      overNumber: nextOvers,
+      batsman: match.striker,
+      bowler: match.bowler,
       batsmanRuns,
       extrasRuns,
       extraType,
       isWicket,
-      isLegalDelivery,
-      batterName: strikerToRecord,
-      bowlerName: match.currentBowler,
       timestamp: Date.now()
     };
-
     await db.balls.add(newBall);
 
-    fetch('/api/commentary', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ball: newBall, match })
-    }).then(res => res.json()).then(data => {
-      if (data.success) {
-        setCommentaryFeed(prev => [{ id: Date.now().toString(), over: `${completedOvers}.${currentBallsInOver + 1}`, text: data.commentary, time: data.timestamp }, ...prev]);
-      }
-    }).catch(e => console.error(e));
-
-    let nextStriker = match.currentStriker;
-    let nextNonStriker = match.currentNonStriker;
-    let isOverComplete = false;
-
-    if (isWicket && !isForcedAllOut) {
-      nextStriker = newBatsmanName.trim();
-    } else if (!isWicket) {
-      const totalRunsThisBall = batsmanRuns + extrasRuns;
-      if (totalRunsThisBall % 2 !== 0) {
-        nextStriker = match.currentNonStriker;
-        nextNonStriker = match.currentStriker;
-      }
-    }
-
-    if (isLegalDelivery && (currentBallsInOver + 1) === 6 && !isWicket) {
-      const temp = nextStriker;
-      nextStriker = nextNonStriker;
-      nextNonStriker = temp;
-      isOverComplete = true;
-    }
-
-    const updatedLegalBallsCount = legalBalls.length + (isLegalDelivery ? 1 : 0);
-    const updatedCompletedOvers = Math.floor(updatedLegalBallsCount / 6);
-    const updatedTotalWickets = totalWickets + (isWicket ? 1 : 0);
-    
-    const innFinishedNow = updatedCompletedOvers >= match.totalOvers || updatedTotalWickets >= match.wicketsLimit;
-    const currentInnBallsAll = [...currentInningsBalls, newBall];
-    const updatedTotalRuns = currentInnBallsAll.reduce((sum, b) => sum + b.batsmanRuns + b.extrasRuns, 0);
-    const targetAchieved = match.innings === 2 && match.target !== null && updatedTotalRuns >= match.target;
-
-    let newStatus = match.status;
-    let waitingForBreak = false;
-
-    if ((innFinishedNow || targetAchieved) && match.innings === 1) {
-      newStatus = 'innings_break';
-      waitingForBreak = true;
-    } else if ((innFinishedNow || targetAchieved) && match.innings === 2) {
-      newStatus = 'completed';
-    }
-
-    await db.matches.update(matchId, {
-      currentStriker: nextStriker,
-      currentNonStriker: nextNonStriker,
-      isWaitingForNewBatter: false,
-      isWaitingForNewBowler: isOverComplete && !innFinishedNow && !targetAchieved,
-      isWaitingForInningsBreak: waitingForBreak,
-      status: newStatus
-    });
-
-    setNewBatsmanName('');
-    setPendingWicketBall(null);
-  };
-
-  const confirmNewBowler = async () => {
-    if (!newBowlerName.trim()) return;
-    await db.matches.update(matchId, {
-      currentBowler: newBowlerName.trim(),
-      isWaitingForNewBowler: false
-    });
-    setNewBowlerName('');
-  };
-
-  const startSecondInnings = async () => {
-    if (!innings1Striker.trim() || !innings1NonStriker.trim() || !innings1Bowler.trim()) {
-      return alert("Please enter opening batters and bowler for Innings 2.");
-    }
-    const targetScore = totalRuns + 1;
-    await db.matches.update(matchId, {
-      innings: 2,
-      target: targetScore,
-      currentStriker: innings1Striker.trim(),
-      currentNonStriker: innings1NonStriker.trim(),
-      currentBowler: innings1Bowler.trim(),
-      status: 'in_progress',
-      isWaitingForInningsBreak: false
-    });
-  };
-
-  const downloadViralSummary = async () => {
-    if (!summaryCardRef.current) return;
     try {
-      const canvas = await html2canvas(summaryCardRef.current, { backgroundColor: '#0F172A', scale: 2 });
-      const link = document.createElement('a');
-      link.download = `${match.teamA}_vs_${match.teamB}_Summary.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
-    } catch (err) {
-      console.error("Failed to generate card", err);
+      const res = await fetch('/api/commentary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batsman: match.striker, bowler: match.bowler, batsmanRuns, extrasRuns, extraType, isWicket })
+      });
+      const data = await res.json();
+      const newCommentary = { id: Date.now().toString(), text: data.commentary, timestamp: `${nextOvers}.${nextBalls === 0 ? 6 : nextBalls}` };
+      setCommentaries(prev => [newCommentary, ...prev]);
+    } catch (e) {
+      // fallback
     }
+
+    let updatedMatchData: Partial<Match> = {
+      striker: nextStriker,
+      nonStriker: nextNonStriker,
+    };
+
+    if (isInn1) {
+      updatedMatchData.inning1Score = nextScore;
+      updatedMatchData.inning1Wickets = nextWickets;
+      updatedMatchData.inning1Overs = nextOvers;
+      updatedMatchData.inning1Balls = nextBalls;
+    } else {
+      updatedMatchData.inning2Score = nextScore;
+      updatedMatchData.inning2Wickets = nextWickets;
+      updatedMatchData.inning2Overs = nextOvers;
+      updatedMatchData.inning2Balls = nextBalls;
+    }
+
+    if (matchWon) {
+      updatedMatchData.isCompleted = true;
+      updatedMatchData.resultSummary = resultText;
+      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+    } else if (inningsEnded && isInn1) {
+      updatedMatchData.isInningsBreak = true;
+      updatedMatchData.target = nextScore + 1;
+    } else if (isWicket && nextWickets < match.totalWickets) {
+      updatedMatchData.isWaitingForNewBatter = true;
+    } else if (overCompleted && !matchWon) {
+      updatedMatchData.isWaitingForNewBowler = true;
+    }
+
+    await db.matches.update(id, updatedMatchData);
+    loadMatchData();
   };
 
-  const battingTeam = match.innings === 1 ? match.teamA : match.teamB;
+  const handleUndo = async () => {
+    if (match.isCompleted) return;
+    const lastBall = await db.balls.where('matchId').equals(id).reverse().sortBy('timestamp');
+    if (lastBall.length === 0) return;
+
+    const ballToDelete = lastBall[0];
+    await db.balls.delete(ballToDelete.id!);
+
+    const totalRuns = ballToDelete.batsmanRuns + ballToDelete.extrasRuns;
+    const isLegal = ballToDelete.extraType !== 'wide' && ballToDelete.extraType !== 'noball';
+
+    let prevScore = currentScore - totalRuns;
+    let prevWickets = currentWickets - (ballToDelete.isWicket ? 1 : 0);
+    let prevBalls = currentBalls - (isLegal ? 1 : 0);
+    let prevOvers = currentOvers;
+    if (prevBalls < 0) {
+      prevBalls = 5;
+      prevOvers = Math.max(0, prevOvers - 1);
+    }
+
+    let updated: Partial<Match> = {};
+    if (isInn1) {
+      updated = { inning1Score: prevScore, inning1Wickets: prevWickets, inning1Overs: prevOvers, inning1Balls: prevBalls };
+    } else {
+      updated = { inning2Score: prevScore, inning2Wickets: prevWickets, inning2Overs: prevOvers, inning2Balls: prevBalls };
+    }
+
+    await db.matches.update(id, updated);
+    loadMatchData();
+  };
+
+  const handleNewBatterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBatterName) return;
+    await db.matches.update(id, { striker: newBatterName, isWaitingForNewBatter: false });
+    setNewBatterName('');
+    loadMatchData();
+  };
+
+  const handleNewBowlerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBowlerName) return;
+    await db.matches.update(id, { bowler: newBowlerName, isWaitingForNewBowler: false });
+    setNewBowlerName('');
+    loadMatchData();
+  };
+
+  const handleStartInnings2 = async (openingStriker: string, openingNonStriker: string, openingBowler: string) => {
+    if (!openingStriker || !openingNonStriker || !openingBowler) {
+      alert('Please fill in opening players for Innings 2');
+      return;
+    }
+    await db.matches.update(id, {
+      currentInning: 2,
+      battingTeam: match.teamB,
+      bowlingTeam: match.teamA,
+      striker: openingStriker,
+      nonStriker: openingNonStriker,
+      bowler: openingBowler,
+      isInningsBreak: false,
+    });
+    loadMatchData();
+  };
 
   return (
-    <div className="stadium-background">
-      <div className="app-shell glass-overlay">
-        
-        <div className="app-header">
-          <button onClick={() => router.push('/')} className="back-btn">
-            <ChevronLeft size={20} /> Back
-          </button>
-          <span className="header-title">Match Center</span>
-          <div style={{ width: 60 }}></div> 
+    <div className="mobile-app-container">
+      <header className="app-header">
+        <button className="back-btn" onClick={() => router.push('/')}>
+          <ArrowLeft size={18} />
+        </button>
+        <div className="header-title">
+          <h2>{match.teamA} vs {match.teamB}</h2>
+          <span className="live-pill">Inning {match.currentInning}</span>
         </div>
+        <button className="undo-btn" onClick={handleUndo} title="Undo Last Ball">
+          <RotateCcw size={18} />
+        </button>
+      </header>
 
-        <div className="scroll-content padding-bottom-large">
-          {activeTab === 'scorer' && (
-            <div className="animate-fade-in">
-              <div className="glass-panel main-score-panel">
-                <div className="match-status-row">
-                  <span className="match-innings">{match.status === 'completed' ? 'Final Result' : `Innings ${match.innings}`}</span>
-                  <span className="match-teams-head">{match.teamA} vs {match.teamB}</span>
+      <main className="app-content mobile-scrollable">
+        {activeTab === 'scorer' && (
+          <div className="command-center">
+            <div className="scoreboard-glass glass-card">
+              <div className="score-display">
+                <span className="team-name-label">{match.battingTeam}</span>
+                <div className="main-score">
+                  {currentScore}<span>/{currentWickets}</span>
                 </div>
-                
-                <div className="score-display">
-                  <div className="score-main">
-                    {totalRuns}<span className="score-divider">/</span>{totalWickets}
-                  </div>
-                  <div className="overs-target-col">
-                    <div className="overs-text">Overs {completedOvers}.{currentBallsInOver} <span className="text-muted">/ {match.totalOvers}</span></div>
-                    {match.target !== null && <div className="target-text">Target: {match.target}</div>}
-                  </div>
-                </div>
-
-                <WormChart balls={balls} innings={match.innings} />
-              </div>
-
-              <div className="glass-panel players-panel">
-                <div className="player-row active-striker">
-                  <div className="player-info">
-                    <UserCircle size={16} className="icon-blue" />
-                    <span className="player-name">{match.currentStriker}</span>
-                  </div>
-                  <div className="player-stats">{strikerStat.runs} <span className="text-muted">({strikerStat.balls})</span></div>
-                </div>
-                <div className="player-row">
-                  <div className="player-info">
-                    <span className="player-name indent">{match.currentNonStriker}</span>
-                  </div>
-                  <div className="player-stats">{nonStrikerStat.runs} <span className="text-muted">({nonStrikerStat.balls})</span></div>
-                </div>
-                <div className="divider-line"></div>
-                <div className="player-row">
-                  <div className="player-info">
-                    <Target size={16} className="text-muted" />
-                    <span className="player-name text-muted">{match.currentBowler}</span>
-                  </div>
-                  <div className="player-stats">{bowlerStat.wickets}-{bowlerStat.runsConceded} <span className="text-muted">({bowlerOversFormatted})</span></div>
+                <div className="match-meta-info">
+                  <span>Overs: <strong>{currentOvers}.{currentBalls}</strong> / {match.totalOvers}</span>
+                  {!isInn1 && match.target && <span className="target-pill">Target: {match.target}</span>}
                 </div>
               </div>
 
-              {match.status === 'completed' || isTargetChased || match.status === 'innings_break' ? (
-                <div className="glass-panel info-panel">
-                  <h3 className="formal-heading">{match.status === 'completed' || isTargetChased ? 'Match Complete' : 'Innings Complete'}</h3>
-                  <p className="formal-subtext">
-                    {match.status === 'completed' || isTargetChased
-                      ? matchResultText 
-                      : `Target for ${match.teamB} is ${totalRuns + 1} runs.`}
-                  </p>
-                </div>
-              ) : null}
+              <WormChart balls={balls.filter(b => b.inning === match.currentInning)} />
             </div>
-          )}
 
-          {activeTab === 'scorecard' && (
-            <div className="scorecard-wrapper animate-fade-in">
-              <h2 className="formal-heading">Batting - {battingTeam}</h2>
-              <div className="glass-panel table-panel">
-                <table className="data-table">
-                  <thead>
-                    <tr><th>Batter</th><th className="align-right">R</th><th className="align-right">B</th><th className="align-right">4s</th><th className="align-right">6s</th><th className="align-right">SR</th></tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(batsmenStats).map(([name, stat]) => (
-                      <tr key={name}>
-                        <td>
-                          <div className="td-name">{name}</div>
-                          <div className="td-sub">{stat.dismissal}</div>
-                        </td>
-                        <td className="align-right fw-600">{stat.runs}</td>
-                        <td className="align-right text-muted">{stat.balls}</td>
-                        <td className="align-right text-muted">{stat.fours}</td>
-                        <td className="align-right text-muted">{stat.sixes}</td>
-                        <td className="align-right text-muted">{stat.balls > 0 ? ((stat.runs / stat.balls) * 100).toFixed(1) : "0.0"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="players-grid">
+              <div className="player-widget active-striker">
+                <span className="p-label">Striker *</span>
+                <span className="p-name">{match.striker}</span>
               </div>
-
-              <h2 className="formal-heading" style={{ marginTop: '1.5rem' }}>Bowling</h2>
-              <div className="glass-panel table-panel">
-                <table className="data-table">
-                  <thead>
-                    <tr><th>Bowler</th><th className="align-right">O</th><th className="align-right">R</th><th className="align-right">W</th><th className="align-right">ECO</th></tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(bowlerStats).map(([name, stat]) => {
-                      const overs = `${Math.floor(stat.legalBallsCount / 6)}.${stat.legalBallsCount % 6}`;
-                      const eco = stat.legalBallsCount > 0 ? (stat.runsConceded / (stat.legalBallsCount / 6)).toFixed(1) : "0.0";
-                      return (
-                        <tr key={name}>
-                          <td><div className="td-name">{name}</div></td>
-                          <td className="align-right text-muted">{overs}</td>
-                          <td className="align-right text-muted">{stat.runsConceded}</td>
-                          <td className="align-right fw-600">{stat.wickets}</td>
-                          <td className="align-right text-muted">{eco}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="player-widget">
+                <span className="p-label">Non-Striker</span>
+                <span className="p-name">{match.nonStriker}</span>
+              </div>
+              <div className="player-widget bowler-widget">
+                <span className="p-label">Bowler</span>
+                <span className="p-name">{match.bowler}</span>
               </div>
             </div>
-          )}
 
-          {activeTab === 'commentary' && (
-            <div className="animate-fade-in padding-top">
-              <LiveCommentary feed={commentaryFeed} />
-            </div>
-          )}
-
-          {activeTab === 'summary' && match.status === 'completed' && (
-            <div className="animate-fade-in padding-top">
-              <div className="viral-card" ref={summaryCardRef}>
-                <div className="viral-header">Match Summary</div>
-                <h2 className="viral-title">{match.teamA} vs {match.teamB}</h2>
-                <div className="viral-result">{matchResultText}</div>
-                
-                <div className="viral-scores">
-                  <div className="viral-box">
-                    <span className="viral-label">{match.teamA}</span>
-                    <span className="viral-score">{inn1ScoreStr}</span>
-                  </div>
-                  <div className="viral-box">
-                    <span className="viral-label">{match.teamB}</span>
-                    <span className="viral-score">{inn2ScoreStr || 'DNB'}</span>
-                  </div>
-                </div>
-                <div className="viral-footer">Generated by Gully Cricket Pro</div>
+            <div className="action-pad glass-card">
+              <div className="pad-grid">
+                <button className="run-btn" onClick={() => recordBall(0, 0, 'none', false)}>0</button>
+                <button className="run-btn" onClick={() => recordBall(1, 0, 'none', false)}>1</button>
+                <button className="run-btn" onClick={() => recordBall(2, 0, 'none', false)}>2</button>
+                <button className="run-btn" onClick={() => recordBall(3, 0, 'none', false)}>3</button>
+                <button className="run-btn boundary" onClick={() => recordBall(4, 0, 'none', false)}>4</button>
+                <button className="run-btn boundary six" onClick={() => recordBall(6, 0, 'none', false)}>6</button>
+                <button className="action-sub-btn" onClick={() => recordBall(0, 1, 'wide', false)}>WD</button>
+                <button className="action-sub-btn" onClick={() => recordBall(0, 1, 'noball', false)}>NB</button>
+                <button className="action-sub-btn wicket-btn" onClick={() => recordBall(0, 0, 'none', true)}>WICKET</button>
               </div>
-              
-              <button className="btn-solid" onClick={downloadViralSummary} style={{ marginTop: '1.5rem' }}>
-                Download Graphic
-              </button>
             </div>
-          )}
+          </div>
+        )}
+
+        {activeTab === 'scorecard' && (
+          <div className="tab-pane">
+            <h3>Match Scorecard</h3>
+            <div className="glass-card scorecard-table-card">
+              <h4>{match.teamA} vs {match.teamB} Summary</h4>
+              <p>Innings 1 Score: <strong>{match.inning1Score}/{match.inning1Wickets}</strong> ({match.inning1Overs}.{match.inning1Balls} ov)</p>
+              <p>Innings 2 Score: <strong>{match.inning2Score}/{match.inning2Wickets}</strong> ({match.inning2Overs}.{match.inning2Balls} ov)</p>
+              {match.resultSummary && <p className="result-banner">{match.resultSummary}</p>}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'feed' && (
+          <div className="tab-pane">
+            <LiveCommentary commentaries={commentaries} />
+          </div>
+        )}
+      </main>
+
+      <nav className="bottom-nav">
+        <button className={`nav-item ${activeTab === 'scorer' ? 'active' : ''}`} onClick={() => setActiveTab('scorer')}>
+          <Activity size={20} />
+          <span>Console</span>
+        </button>
+        <button className={`nav-item ${activeTab === 'scorecard' ? 'active' : ''}`} onClick={() => setActiveTab('scorecard')}>
+          <BarChart2 size={20} />
+          <span>Scorecard</span>
+        </button>
+        <button className={`nav-item ${activeTab === 'feed' ? 'active' : ''}`} onClick={() => setActiveTab('feed')}>
+          <Shield size={20} />
+          <span>Feed</span>
+        </button>
+      </nav>
+
+      {match.isWaitingForNewBatter && (
+        <div className="bottom-sheet-overlay">
+          <div className="bottom-sheet glass-card">
+            <h3>Wicket Fallen! Enter New Batsman</h3>
+            <form onSubmit={handleNewBatterSubmit}>
+              <input 
+                type="text" 
+                className="formal-input" 
+                placeholder="New Batsman Name" 
+                value={newBatterName} 
+                onChange={(e) => setNewBatterName(e.target.value)} 
+                required 
+                autoFocus 
+              />
+              <button type="submit" className="primary-btn">Confirm Batter</button>
+            </form>
+          </div>
         </div>
+      )}
 
-        {/* Undo Button */}
-        {activeTab === 'scorer' && match.status !== 'completed' && match.status !== 'innings_break' && currentInningsBalls.length > 0 && (
-          <button className="floating-undo-btn" onClick={undoLastBall}>
-            <Undo2 size={16} /> Undo
-          </button>
-        )}
-
-        {/* Action Pad */}
-        {activeTab === 'scorer' && match.status !== 'completed' && match.status !== 'innings_break' && !isTargetChased && !isAllOut && (
-          <div className="mobile-action-pad">
-            <button className="action-btn dot" onClick={() => recordDelivery(0, 0, 'none', false)}>0</button>
-            <button className="action-btn run" onClick={() => recordDelivery(1, 0, 'none', false)}>1</button>
-            <button className="action-btn run" onClick={() => recordDelivery(2, 0, 'none', false)}>2</button>
-            <button className="action-btn run" onClick={() => recordDelivery(3, 0, 'none', false)}>3</button>
-            <button className="action-btn run" onClick={() => recordDelivery(4, 0, 'none', false)}>4</button>
-            <button className="action-btn run" onClick={() => recordDelivery(6, 0, 'none', false)}>6</button>
-            <button className="action-btn extra" onClick={() => recordDelivery(0, 1, 'wide', false)}>WD</button>
-            <button className="action-btn extra" onClick={() => recordDelivery(0, 1, 'noball', false)}>NB</button>
-            <button className="action-btn wicket" onClick={() => recordDelivery(0, 0, 'none', true)}>W</button>
+      {match.isWaitingForNewBowler && (
+        <div className="bottom-sheet-overlay">
+          <div className="bottom-sheet glass-card">
+            <h3>Over Completed! Select Next Bowler</h3>
+            <form onSubmit={handleNewBowlerSubmit}>
+              <input 
+                type="text" 
+                className="formal-input" 
+                placeholder="Next Bowler Name" 
+                value={newBowlerName} 
+                onChange={(e) => setNewBowlerName(e.target.value)} 
+                required 
+                autoFocus 
+              />
+              <button type="submit" className="primary-btn">Confirm Bowler</button>
+            </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Bottom Nav */}
-        {!(activeTab === 'scorer' && match.status === 'in_progress' && !isTargetChased && !isAllOut) && (
-          <div className="bottom-nav-bar">
-            <button className={`nav-item ${activeTab === 'scorer' ? 'active' : ''}`} onClick={() => setActiveTab('scorer')}>
-              <Activity size={20} /><span>Live</span>
-            </button>
-            <button className={`nav-item ${activeTab === 'scorecard' ? 'active' : ''}`} onClick={() => setActiveTab('scorecard')}>
-              <LayoutList size={20} /><span>Data</span>
-            </button>
-            <button className={`nav-item ${activeTab === 'commentary' ? 'active' : ''}`} onClick={() => setActiveTab('commentary')}>
-              <MessageSquare size={20} /><span>Feed</span>
-            </button>
-            {match.status === 'completed' && (
-              <button className={`nav-item ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>
-                <Download size={20} /><span>Export</span>
-              </button>
-            )}
-          </div>
-        )}
+      {match.isInningsBreak && (
+        <InningsBreakModal match={match} onStartInnings2={handleStartInnings2} />
+      )}
+    </div>
+  );
+}
 
-        {/* Bottom Sheets */}
-        {match.isWaitingForNewBatter && (
-          <div className="bottom-sheet-backdrop">
-            <div className="bottom-sheet">
-              <div className="sheet-handle"></div>
-              <h3 className="modal-title">Batter Dismissed</h3>
-              <p className="modal-desc">Please enter the name of the incoming batter.</p>
-              <input type="text" className="formal-input mb-15" placeholder="Batter Name" value={newBatsmanName} onChange={(e) => setNewBatsmanName(e.target.value)} autoFocus />
-              <button className="btn-solid" disabled={!newBatsmanName.trim()} onClick={() => executeBallCommit(pendingWicketBall.batsmanRuns, pendingWicketBall.extrasRuns, pendingWicketBall.extraType, true, match.currentStriker, false)}>
-                Confirm Batter
-              </button>
-            </div>
-          </div>
-        )}
+function InningsBreakModal({ match, onStartInnings2 }: { match: Match; onStartInnings2: (s: string, ns: string, b: string) => void }) {
+  const [s, setS] = useState('');
+  const [ns, setNs] = useState('');
+  const [b, setB] = useState('');
 
-        {match.isWaitingForNewBowler && (
-          <div className="bottom-sheet-backdrop">
-            <div className="bottom-sheet">
-              <div className="sheet-handle"></div>
-              <h3 className="modal-title">Over Completed</h3>
-              <p className="modal-desc">Please enter the name of the next bowler.</p>
-              <input type="text" className="formal-input mb-15" placeholder="Bowler Name" value={newBowlerName} onChange={(e) => setNewBowlerName(e.target.value)} autoFocus />
-              <button className="btn-solid" disabled={!newBowlerName.trim()} onClick={confirmNewBowler}>
-                Confirm Bowler
-              </button>
-            </div>
-          </div>
-        )}
-
-        {(match.status === 'innings_break' || match.isWaitingForInningsBreak) && (
-          <div className="bottom-sheet-backdrop">
-            <div className="bottom-sheet">
-              <div className="sheet-handle"></div>
-              <h3 className="modal-title">Innings Break</h3>
-              <p className="modal-desc">Target for {match.teamB} is <strong>{totalRuns + 1}</strong>.</p>
-              <div className="modal-form-stack">
-                <input type="text" className="formal-input" placeholder={`${match.teamB} Striker`} value={innings1Striker} onChange={(e) => setInnings1Striker(e.target.value)} />
-                <input type="text" className="formal-input" placeholder={`${match.teamB} Non-Striker`} value={innings1NonStriker} onChange={(e) => setInnings1NonStriker(e.target.value)} />
-                <input type="text" className="formal-input" placeholder={`${match.teamA} Bowler`} value={innings1Bowler} onChange={(e) => setInnings1Bowler(e.target.value)} />
-              </div>
-              <button className="btn-solid mt-15" onClick={startSecondInnings}>Begin Run Chase</button>
-            </div>
-          </div>
-        )}
-
+  return (
+    <div className="bottom-sheet-overlay">
+      <div className="bottom-sheet glass-card">
+        <h3>Innings Break</h3>
+        <p>{match.teamA} scored {match.inning1Score}. Target for {match.teamB}: <strong>{match.target}</strong></p>
+        <div className="input-group">
+          <label>Innings 2 Opening Striker</label>
+          <input type="text" className="formal-input" placeholder="Striker Name" value={s} onChange={e => setS(e.target.value)} />
+        </div>
+        <div className="input-group">
+          <label>Innings 2 Opening Non-Striker</label>
+          <input type="text" className="formal-input" placeholder="Non-Striker Name" value={ns} onChange={e => setNs(e.target.value)} />
+        </div>
+        <div className="input-group">
+          <label>Innings 2 Opening Bowler</label>
+          <input type="text" className="formal-input" placeholder="Bowler Name" value={b} onChange={e => setB(e.target.value)} />
+        </div>
+        <button className="primary-btn" onClick={() => onStartInnings2(s, ns, b)}>Start Innings 2</button>
       </div>
     </div>
   );

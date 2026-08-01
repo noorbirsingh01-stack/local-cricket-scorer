@@ -1,31 +1,32 @@
-"use client";
+'use client';
+
 import React from 'react';
 
 interface CommentaryItem {
   id: string;
-  over: string;
   text: string;
-  time: string;
+  timestamp: string;
 }
 
 interface LiveCommentaryProps {
-  feed: CommentaryItem[];
+  commentaries: CommentaryItem[];
 }
 
-export default function LiveCommentary({ feed }: LiveCommentaryProps) {
+export default function LiveCommentary({ commentaries }: LiveCommentaryProps) {
   return (
-    <div className="commentary-container">
+    <div className="commentary-feed glass-card">
+      <div className="commentary-header">
+        <h3>AI Match Feed</h3>
+        <span className="live-dot"></span>
+      </div>
       <div className="commentary-list">
-        {feed.length === 0 ? (
-          <p className="empty-text">Awaiting first delivery...</p>
+        {commentaries.length === 0 ? (
+          <p className="no-commentary">Commentary stream will appear here as balls are scored...</p>
         ) : (
-          feed.map((item) => (
-            <div key={item.id} className="commentary-row animate-fade-in">
-              <div className="commentary-over">{item.over}</div>
-              <div className="commentary-details">
-                <p className="commentary-text">{item.text}</p>
-                <span className="commentary-time">{item.time}</span>
-              </div>
+          commentaries.map((item) => (
+            <div key={item.id} className="commentary-item">
+              <span className="commentary-time">{item.timestamp}</span>
+              <p>{item.text}</p>
             </div>
           ))
         )}
